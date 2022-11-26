@@ -3,31 +3,46 @@
 
 from oauthlib.oauth2 import LegacyApplicationClient
 from requests_oauthlib import OAuth2Session
+from dotenv import dotenv_values
+import os
 import requests
 import json
 import time
+import pickle
 
-my_username = "[username]"
-my_password = "[password]"
+TOKEN_PATH = os.path.join(os.getcwd(),'danalock.token')
+MAX_AGE = 43200
 
+CONFIG = dotenv_values(".env")
 
 def danalock_initialise(user_id, secret):
+    token = None
     client_id = "danalock-web"
     BASE_URL = "https://api.danalock.com/oauth2/token"
-
     oauth = OAuth2Session(client=LegacyApplicationClient(client_id=client_id))
 
-    token = oauth.fetch_token(token_url=BASE_URL,
-                              username=user_id, password=secret, client_id=client_id,
-                              client_secret="")
+    if os.path.isfile(TOKEN_PATH):
+        token_age = time.time() - os.path.getmtime(TOKEN_PATH)
 
-    if "access_token" not in token:
-        print(f"error getting danalock token - response was {token}")
-        exit()
+        if token_age < MAX_AGE:
+            old_token = pickle.load(open(TOKEN_PATH, "rb"))
+            refreshed_token = oauth.refresh_token(token_url=BASE_URL,access_token=old_token['access_token'],refresh_token=old_token['refresh_token'],client_id=client_id,client_secret="")
+            if "access_token" in refreshed_token:
+                token = refreshed_token
+    
+    if not token:            
+        token = oauth.fetch_token(token_url=BASE_URL,
+                                username=user_id, password=secret, client_id=client_id,
+                                client_secret="")
+
+        if "access_token" not in token:
+            print(f"error getting danalock token - response was {token}")
+            exit()
+    
+    pickle.dump(token, open(TOKEN_PATH, "wb"))
 
     return token["access_token"], token["refresh_token"]
-
-
+    
 # returns a dict of each lock's name and its serial number (needed for commands)
 def get_all_danalocks(token):
 
@@ -209,28 +224,29 @@ def operate_danalock(token, serial, command):
     else:
         print(f"Unexpected response to command {command} was {r.text}")
 
-
+lock_name = CONFIG['LOCK_NAME']
 # start here
-access_token, refresh_token = danalock_initialise(my_username, my_password)
-print(f"got access token {access_token}")
+access_token, refresh_token = danalock_initialise(CONFIG['DANALOCK_USERNAME'], CONFIG['DANALOCK_PASSWORD'])
 
 danalocks = get_all_danalocks(access_token)
-
 print(f"Dict with all danalocks on the account: {danalocks}")
 
+status = get_danalock_status(access_token, danalocks[lock_name])
+print(f"Door lock {lock_name} is {status}")
+
 # gets all the pincodes for the danalock named "front door"
-pin_codes = get_pin_codes(access_token, danalocks["front door"])
-print(f"Front door pin codes: {pin_codes}")
+#pin_codes = get_pin_codes(access_token, danalocks[lock_name])
+#print(f"Front door pin codes: {pin_codes}")
 
 # to create a new PIN #2 or change existing PIN #2
-# set_pin_code(access_token, danalocks["front door"], 2, "1234")
+# set_pin_code(access_token, danalocks[lock_name], 2, "1234")
 
 # to delete existing PIN #2
-# set_pin_code(access_token, danalocks["front door"], 2, "")
+# set_pin_code(access_token, danalocks[lock_name], 2, "")
 
 # to lock the front door
-# operate_danalock(access_token, danalocks["front door"], "lock")
+# operate_danalock(access_token, danalocks[lock_name], "lock")
 
 # to unlock the front door
-# operate_danalock(access_token, danalocks["front door"], "unlock")
+# operate_danalock(access_token, danalocks[lock_name], "unlock")
 
